@@ -7,6 +7,22 @@ using MediaBrowser.Model.Entities;
 namespace MediaBrowser.Model.Configuration;
 
 /// <summary>
+/// Defines how HLS segment cache failures are handled.
+/// </summary>
+public enum RedisSegmentCacheMode
+{
+    /// <summary>
+    /// Redis failures are logged and playback falls back to disk.
+    /// </summary>
+    BestEffort,
+
+    /// <summary>
+    /// Redis failures are treated as startup failures.
+    /// </summary>
+    Required
+}
+
+/// <summary>
 /// Class EncodingOptions.
 /// </summary>
 public class EncodingOptions
@@ -62,6 +78,9 @@ public class EncodingOptions
         AllowOnDemandMetadataBasedKeyframeExtractionForExtensions = ["mkv"];
         HardwareDecodingCodecs = ["h264", "vc1"];
         HlsAudioSeekStrategy = HlsAudioSeekStrategy.TrimCopiedAudio;
+        RedisSegmentCacheConnectionString = string.Empty;
+        RedisSegmentCacheMode = RedisSegmentCacheMode.BestEffort;
+        MaxCachedHlsSegmentBytes = 8 * 1024 * 1024;
     }
 
     /// <summary>
@@ -309,4 +328,19 @@ public class EncodingOptions
     /// </summary>
     [DefaultValue(HlsAudioSeekStrategy.TrimCopiedAudio)]
     public HlsAudioSeekStrategy HlsAudioSeekStrategy { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Redis connection string for HLS segment caching. Leave empty to disable.
+    /// </summary>
+    public string RedisSegmentCacheConnectionString { get; set; }
+
+    /// <summary>
+    /// Gets or sets how Redis segment cache failures are handled.
+    /// </summary>
+    public RedisSegmentCacheMode RedisSegmentCacheMode { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum HLS segment size to store in Redis. Set to 0 to disable the limit.
+    /// </summary>
+    public long MaxCachedHlsSegmentBytes { get; set; }
 }

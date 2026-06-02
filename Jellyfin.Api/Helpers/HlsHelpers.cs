@@ -8,6 +8,7 @@ using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Streaming;
 using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
+using Prometheus;
 
 namespace Jellyfin.Api.Helpers;
 
@@ -16,6 +17,11 @@ namespace Jellyfin.Api.Helpers;
 /// </summary>
 public static class HlsHelpers
 {
+    private static readonly Histogram _minimumSegmentWaitDuration = Metrics.CreateHistogram(
+        "jellyfin_hls_minimum_segment_wait_seconds",
+        "Time spent waiting for the initial HLS segment count.",
+        new HistogramConfiguration { Buckets = Histogram.ExponentialBuckets(0.01, 2, 12) });
+
     /// <summary>
     /// Waits for a minimum number of segments to be available.
     /// </summary>
@@ -26,7 +32,26 @@ public static class HlsHelpers
     /// <returns>A <see cref="Task"/> indicating the waiting process.</returns>
     public static async Task WaitForMinimumSegmentCount(string playlist, int? segmentCount, ILogger logger, CancellationToken cancellationToken)
     {
+        using var timer = _minimumSegmentWaitDuration.NewTimer();
         logger.LogDebug("Waiting for {0} segments in {1}", segmentCount, playlist);
+
+        var playlistDirectory = Path.GetDirectoryName(playlist);
+        if (playlistDirectory is null)
+        {
+            return;
+        }
+
+        // Use a SemaphoreSlim signalled by FileSystemWatcher instead of fixed Task.Delay polling.
+        // This reacts immediately when FFmpeg writes the playlist file, reducing latency by 50-100 ms per segment.
+        using var changeSignal = new SemaphoreSlim(0);
+        using var watcher = new FileSystemWatcher(playlistDirectory, Path.GetFileName(playlist))
+        {
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+            EnableRaisingEvents = true
+        };
+
+        watcher.Changed += (_, _) => changeSignal.Release();
+        watcher.Created += (_, _) => changeSignal.Release();
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -59,15 +84,14 @@ public static class HlsHelpers
                         }
                     }
                 }
-
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
             }
             catch (IOException)
             {
-                // May get an error if the file is locked
+                // May get an error if the file is locked or not yet created.
             }
 
-            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            // Wait for the next file-system change notification (2 s fallback to handle missed events).
+            await changeSignal.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -16,6 +16,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Extensions;
 using Jellyfin.MediaEncoding.Hls.Playlist;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
@@ -61,6 +62,7 @@ public class DynamicHlsController : BaseJellyfinApiController
     private readonly IDynamicHlsPlaylistGenerator _dynamicHlsPlaylistGenerator;
     private readonly DynamicHlsHelper _dynamicHlsHelper;
     private readonly EncodingOptions _encodingOptions;
+    private readonly ISegmentCacheService _segmentCacheService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DynamicHlsController"/> class.
@@ -76,6 +78,7 @@ public class DynamicHlsController : BaseJellyfinApiController
     /// <param name="dynamicHlsHelper">Instance of <see cref="DynamicHlsHelper"/>.</param>
     /// <param name="encodingHelper">Instance of <see cref="EncodingHelper"/>.</param>
     /// <param name="dynamicHlsPlaylistGenerator">Instance of <see cref="IDynamicHlsPlaylistGenerator"/>.</param>
+    /// <param name="segmentCacheService">Instance of <see cref="ISegmentCacheService"/>.</param>
     public DynamicHlsController(
         ILibraryManager libraryManager,
         IUserManager userManager,
@@ -87,7 +90,8 @@ public class DynamicHlsController : BaseJellyfinApiController
         ILogger<DynamicHlsController> logger,
         DynamicHlsHelper dynamicHlsHelper,
         EncodingHelper encodingHelper,
-        IDynamicHlsPlaylistGenerator dynamicHlsPlaylistGenerator)
+        IDynamicHlsPlaylistGenerator dynamicHlsPlaylistGenerator,
+        ISegmentCacheService segmentCacheService)
     {
         _libraryManager = libraryManager;
         _userManager = userManager;
@@ -100,6 +104,7 @@ public class DynamicHlsController : BaseJellyfinApiController
         _dynamicHlsHelper = dynamicHlsHelper;
         _encodingHelper = encodingHelper;
         _dynamicHlsPlaylistGenerator = dynamicHlsPlaylistGenerator;
+        _segmentCacheService = segmentCacheService;
 
         _encodingOptions = serverConfigurationManager.GetEncodingOptions();
     }
@@ -1453,6 +1458,7 @@ public class DynamicHlsController : BaseJellyfinApiController
         var playlistPath = Path.ChangeExtension(state.OutputFilePath, ".m3u8");
 
         var segmentPath = GetSegmentPath(state, playlistPath, segmentId);
+        var cacheKey = BuildSegmentCacheKey(state, segmentId);
 
         var segmentExtension = EncodingHelper.GetSegmentFileExtension(state.Request.SegmentContainer);
 
@@ -1462,7 +1468,7 @@ public class DynamicHlsController : BaseJellyfinApiController
         {
             job = _transcodeManager.OnTranscodeBeginRequest(playlistPath, TranscodingJobType);
             _logger.LogDebug("returning {0} [it exists, try 1]", segmentPath);
-            return await GetSegmentResult(state, playlistPath, segmentPath, segmentExtension, segmentId, job, cancellationToken).ConfigureAwait(false);
+            return await GetSegmentResult(state, playlistPath, segmentPath, segmentExtension, segmentId, cacheKey, job, cancellationToken).ConfigureAwait(false);
         }
 
         using (await _transcodeManager.LockAsync(playlistPath, cancellationToken).ConfigureAwait(false))
@@ -1472,7 +1478,7 @@ public class DynamicHlsController : BaseJellyfinApiController
             {
                 job = _transcodeManager.OnTranscodeBeginRequest(playlistPath, TranscodingJobType);
                 _logger.LogDebug("returning {0} [it exists, try 2]", segmentPath);
-                return await GetSegmentResult(state, playlistPath, segmentPath, segmentExtension, segmentId, job, cancellationToken).ConfigureAwait(false);
+                return await GetSegmentResult(state, playlistPath, segmentPath, segmentExtension, segmentId, cacheKey, job, cancellationToken).ConfigureAwait(false);
             }
 
             var currentTranscodingIndex = GetCurrentTranscodingIndex(playlistPath, segmentExtension);
@@ -1544,7 +1550,7 @@ public class DynamicHlsController : BaseJellyfinApiController
 
         _logger.LogDebug("returning {0} [general case]", segmentPath);
         job ??= _transcodeManager.OnTranscodeBeginRequest(playlistPath, TranscodingJobType);
-        return await GetSegmentResult(state, playlistPath, segmentPath, segmentExtension, segmentId, job, cancellationToken).ConfigureAwait(false);
+        return await GetSegmentResult(state, playlistPath, segmentPath, segmentExtension, segmentId, cacheKey, job, cancellationToken).ConfigureAwait(false);
     }
 
     private static double[] GetSegmentLengths(StreamState state)
@@ -1907,12 +1913,30 @@ public class DynamicHlsController : BaseJellyfinApiController
         return Path.Combine(folder, filename + index.ToString(CultureInfo.InvariantCulture) + EncodingHelper.GetSegmentFileExtension(state.Request.SegmentContainer));
     }
 
+    private string BuildSegmentCacheKey(StreamState state, int segmentId)
+    {
+        var raw = string.Join(
+            '-',
+            state.MediaPath,
+            state.Request.SegmentContainer ?? "ts",
+            state.OutputVideoCodec,
+            state.Request.VideoBitRate?.ToString(CultureInfo.InvariantCulture) ?? "0",
+            state.OutputAudioCodec,
+            state.Request.AudioBitRate?.ToString(CultureInfo.InvariantCulture) ?? "0",
+            state.Request.MaxWidth?.ToString(CultureInfo.InvariantCulture) ?? "0",
+            state.Request.MaxHeight?.ToString(CultureInfo.InvariantCulture) ?? "0",
+            state.Request.SubtitleMethod.ToString(),
+            segmentId.ToString(CultureInfo.InvariantCulture));
+        return "hls:seg:" + raw.GetMD5().ToString("N", CultureInfo.InvariantCulture);
+    }
+
     private async Task<ActionResult> GetSegmentResult(
         StreamState state,
         string playlistPath,
         string segmentPath,
         string segmentExtension,
         int segmentIndex,
+        string cacheKey,
         TranscodingJob? transcodingJob,
         CancellationToken cancellationToken)
     {
@@ -1923,7 +1947,7 @@ public class DynamicHlsController : BaseJellyfinApiController
             {
                 // Transcoding job is over, so assume all existing files are ready
                 _logger.LogDebug("serving up {0} as transcode is over", segmentPath);
-                return GetSegmentResult(state, segmentPath, transcodingJob);
+                return await GetSegmentResultAsync(state, segmentPath, cacheKey, transcodingJob, cancellationToken).ConfigureAwait(false);
             }
 
             var currentTranscodingIndex = GetCurrentTranscodingIndex(playlistPath, segmentExtension);
@@ -1932,13 +1956,15 @@ public class DynamicHlsController : BaseJellyfinApiController
             if (segmentIndex < currentTranscodingIndex)
             {
                 _logger.LogDebug("serving up {0} as transcode index {1} is past requested point {2}", segmentPath, currentTranscodingIndex, segmentIndex);
-                return GetSegmentResult(state, segmentPath, transcodingJob);
+                return await GetSegmentResultAsync(state, segmentPath, cacheKey, transcodingJob, cancellationToken).ConfigureAwait(false);
             }
         }
 
         var nextSegmentPath = GetSegmentPath(state, playlistPath, segmentIndex + 1);
         if (transcodingJob is not null)
         {
+            using var segmentSignal = new SemaphoreSlim(0);
+            using var segmentWatcher = CreateSegmentWatcher(segmentPath, nextSegmentPath, segmentSignal);
             while (!cancellationToken.IsCancellationRequested && !transcodingJob.HasExited)
             {
                 // To be considered ready, the segment file has to exist AND
@@ -1948,7 +1974,7 @@ public class DynamicHlsController : BaseJellyfinApiController
                     if (transcodingJob.HasExited || System.IO.File.Exists(nextSegmentPath))
                     {
                         _logger.LogDebug("Serving up {SegmentPath} as it deemed ready", segmentPath);
-                        return GetSegmentResult(state, segmentPath, transcodingJob);
+                        return await GetSegmentResultAsync(state, segmentPath, cacheKey, transcodingJob, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else
@@ -1960,7 +1986,7 @@ public class DynamicHlsController : BaseJellyfinApiController
                     }
                 }
 
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+                await segmentSignal.WaitAsync(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
             }
 
             if (!System.IO.File.Exists(segmentPath))
@@ -1979,26 +2005,102 @@ public class DynamicHlsController : BaseJellyfinApiController
             _logger.LogWarning("cannot serve {0} as it doesn't exist and no transcode is running", segmentPath);
         }
 
-        return GetSegmentResult(state, segmentPath, transcodingJob);
+        return await GetSegmentResultAsync(state, segmentPath, cacheKey, transcodingJob, cancellationToken).ConfigureAwait(false);
     }
 
-    private ActionResult GetSegmentResult(StreamState state, string segmentPath, TranscodingJob? transcodingJob)
+    private FileSystemWatcher? CreateSegmentWatcher(string segmentPath, string nextSegmentPath, SemaphoreSlim segmentSignal)
+    {
+        var segmentDirectory = Path.GetDirectoryName(segmentPath);
+        if (string.IsNullOrEmpty(segmentDirectory))
+        {
+            return null;
+        }
+
+        var segmentFileName = Path.GetFileName(segmentPath);
+        var nextSegmentFileName = Path.GetFileName(nextSegmentPath);
+        var watcher = new FileSystemWatcher(segmentDirectory)
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            EnableRaisingEvents = true
+        };
+
+        FileSystemEventHandler handler = (_, args) =>
+        {
+            if (string.Equals(args.Name, segmentFileName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(args.Name, nextSegmentFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                segmentSignal.Release();
+            }
+        };
+
+        watcher.Created += handler;
+        watcher.Changed += handler;
+        return watcher;
+    }
+
+    private async Task<ActionResult> GetSegmentResultAsync(
+        StreamState state,
+        string segmentPath,
+        string cacheKey,
+        TranscodingJob? transcodingJob,
+        CancellationToken cancellationToken)
     {
         var segmentEndingPositionTicks = state.Request.CurrentRuntimeTicks + state.Request.ActualSegmentLengthTicks;
 
-        Response.OnCompleted(() =>
+        var cachedSegment = await _segmentCacheService.GetSegmentAsync(cacheKey, cancellationToken).ConfigureAwait(false);
+        if (cachedSegment.Status == SegmentCacheGetStatus.Hit && cachedSegment.Bytes is not null)
         {
-            _logger.LogDebug("Finished serving {SegmentPath}", segmentPath);
-            if (transcodingJob is not null)
-            {
-                transcodingJob.DownloadPositionTicks = Math.Max(transcodingJob.DownloadPositionTicks ?? segmentEndingPositionTicks, segmentEndingPositionTicks);
-                _transcodeManager.OnTranscodeEndRequest(transcodingJob);
-            }
+            Response.OnCompleted(() => CompleteSegmentResponseAsync(segmentPath, segmentEndingPositionTicks, transcodingJob, true));
 
-            return Task.CompletedTask;
+            return new FileContentResult(cachedSegment.Bytes, MimeTypes.GetMimeType(segmentPath));
+        }
+
+        // Cache miss — serve from disk and schedule background cache store
+        Response.OnCompleted(() => CompleteSegmentResponseAsync(segmentPath, segmentEndingPositionTicks, transcodingJob, false));
+
+        // Store segment in cache after the response is sent (fire-and-forget)
+        Response.OnCompleted(async () =>
+        {
+            try
+            {
+                if (_encodingOptions.MaxCachedHlsSegmentBytes > 0)
+                {
+                    var fileInfo = new FileInfo(segmentPath);
+                    if (!fileInfo.Exists || fileInfo.Length > _encodingOptions.MaxCachedHlsSegmentBytes)
+                    {
+                        _logger.LogDebug(
+                            "Skipping HLS segment cache store for {SegmentPath}; size {SegmentSize} exceeds limit {SegmentCacheLimit}",
+                            segmentPath,
+                            fileInfo.Exists ? fileInfo.Length : 0,
+                            _encodingOptions.MaxCachedHlsSegmentBytes);
+                        return;
+                    }
+                }
+
+                // Use a short timeout so a hanging disk/Redis store cannot block a thread indefinitely.
+                using var cacheStoreCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var bytes = await System.IO.File.ReadAllBytesAsync(segmentPath, cacheStoreCts.Token).ConfigureAwait(false);
+                await _segmentCacheService.SetSegmentAsync(cacheKey, bytes, cacheStoreCts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Unable to store HLS segment {SegmentPath} in cache.", segmentPath);
+            }
         });
 
         return FileStreamResponseHelpers.GetStaticFileResult(segmentPath, MimeTypes.GetMimeType(segmentPath));
+    }
+
+    private Task CompleteSegmentResponseAsync(string segmentPath, long segmentEndingPositionTicks, TranscodingJob? transcodingJob, bool servedFromCache)
+    {
+        _logger.LogDebug("Finished serving {SegmentPath} (CacheHit: {CacheHit})", segmentPath, servedFromCache);
+        if (transcodingJob is not null)
+        {
+            transcodingJob.DownloadPositionTicks = Math.Max(transcodingJob.DownloadPositionTicks ?? segmentEndingPositionTicks, segmentEndingPositionTicks);
+            _transcodeManager.OnTranscodeEndRequest(transcodingJob);
+        }
+
+        return Task.CompletedTask;
     }
 
     private int? GetCurrentTranscodingIndex(string playlist, string segmentExtension)
