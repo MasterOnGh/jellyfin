@@ -314,11 +314,17 @@ public class ItemPersistenceService : IItemPersistenceService
             .Select(f => (f.Item, Values: f.Values.Select(e => itemValuesStore.First(g => g.Value == e.Value && g.Type == e.MagicNumber)).DistinctBy(e => e.ItemValueId).ToArray()))
             .ToArray();
 
-        var mappedValues = context.ItemValuesMap.Where(e => ids.Contains(e.ItemId)).ToList();
+        var mappedValuesByItemId = context.ItemValuesMap
+            .Where(e => ids.Contains(e.ItemId))
+            .ToList()
+            .GroupBy(e => e.ItemId)
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         foreach (var item in valueMap)
         {
-            var itemMappedValues = mappedValues.Where(e => e.ItemId == item.Item.Id).ToList();
+            var itemMappedValues = mappedValuesByItemId.TryGetValue(item.Item.Id, out var existingMappedValues)
+                ? existingMappedValues
+                : new List<ItemValueMap>();
             foreach (var itemValue in item.Values)
             {
                 var existingItem = itemMappedValues.FirstOrDefault(f => f.ItemValueId == itemValue.ItemValueId);

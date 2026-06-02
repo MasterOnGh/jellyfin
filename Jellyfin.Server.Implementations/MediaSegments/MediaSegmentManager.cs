@@ -90,19 +90,24 @@ public class MediaSegmentManager : IMediaSegmentManager
                 }
 
                 IQueryable<MediaSegment> existingSegments;
+                MediaSegment[] existingSegmentEntities;
                 if (forceOverwrite)
                 {
                     existingSegments = Array.Empty<MediaSegment>().AsQueryable();
+                    existingSegmentEntities = Array.Empty<MediaSegment>();
                 }
                 else
                 {
                     existingSegments = db.MediaSegments.Where(e => e.ItemId.Equals(baseItem.Id) && e.SegmentProviderId == GetProviderId(provider.Name));
+
+                    // Materialize once (untracked) and reuse below to avoid executing the same query twice.
+                    existingSegmentEntities = await existingSegments.AsNoTracking().ToArrayAsync(cancellationToken).ConfigureAwait(false);
                 }
 
                 var requestItem = new MediaSegmentGenerationRequest()
                 {
                     ItemId = baseItem.Id,
-                    ExistingSegments = existingSegments.Select(e => Map(e)).ToArray()
+                    ExistingSegments = existingSegmentEntities.Select(e => Map(e)).ToArray()
                 };
 
                 try
@@ -112,7 +117,7 @@ public class MediaSegmentManager : IMediaSegmentManager
 
                     if (!forceOverwrite)
                     {
-                        var existingSegmentsList = existingSegments.ToArray(); // Cannot use requestItem's list, as the provider might tamper with its items.
+                        var existingSegmentsList = existingSegmentEntities; // Cannot use requestItem's list, as the provider might tamper with its items.
                         if (segments.Count == requestItem.ExistingSegments.Count && segments.All(e => existingSegmentsList.Any(f =>
                         {
                             return

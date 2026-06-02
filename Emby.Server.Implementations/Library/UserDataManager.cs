@@ -60,11 +60,17 @@ namespace Emby.Server.Implementations.Library
             using var dbContext = _repository.CreateDbContext();
             using var transaction = dbContext.Database.BeginTransaction();
 
+            // Fetch all existing keys in a single query instead of one per key in the loop.
+            var existingKeys = dbContext.UserData
+                .Where(f => f.ItemId == item.Id && f.UserId == user.Id)
+                .Select(f => f.CustomDataKey)
+                .ToHashSet();
+
             foreach (var key in keys)
             {
                 userData.Key = key;
                 var userDataEntry = Map(userData, user.Id, item.Id);
-                if (dbContext.UserData.Any(f => f.ItemId == userDataEntry.ItemId && f.UserId == userDataEntry.UserId && f.CustomDataKey == userDataEntry.CustomDataKey))
+                if (existingKeys.Contains(userDataEntry.CustomDataKey))
                 {
                     dbContext.UserData.Attach(userDataEntry).State = EntityState.Modified;
                 }
