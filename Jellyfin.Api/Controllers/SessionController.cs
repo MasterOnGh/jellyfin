@@ -436,6 +436,7 @@ public class SessionController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<IEnumerable<NameIdPair>> GetAuthProviders()
     {
+        Response.Headers.CacheControl = "public, max-age=86400";
         return _userManager.GetAuthenticationProviders();
     }
 
@@ -450,6 +451,7 @@ public class SessionController : BaseJellyfinApiController
     [Authorize(Policy = Policies.RequiresElevation)]
     public ActionResult<IEnumerable<NameIdPair>> GetPasswordResetProviders()
     {
+        Response.Headers.CacheControl = "public, max-age=86400";
         return _userManager.GetPasswordResetProviders();
     }
 }

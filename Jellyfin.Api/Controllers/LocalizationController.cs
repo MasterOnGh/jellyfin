@@ -43,6 +43,7 @@ public class LocalizationController : BaseJellyfinApiController
             .OrderBy(c => c.DisplayName)
             .AsEnumerable();
 
+        Response.Headers.CacheControl = "public, max-age=86400";
         return Ok(distinctCultures);
     }
 
@@ -55,6 +56,7 @@ public class LocalizationController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<IReadOnlyList<CountryInfo>> GetCountries()
     {
+        Response.Headers.CacheControl = "public, max-age=86400";
         return Ok(_localization.GetCountries());
     }
 
@@ -67,6 +69,7 @@ public class LocalizationController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<IReadOnlyList<ParentalRating>> GetParentalRatings()
     {
+        Response.Headers.CacheControl = "public, max-age=86400";
         return Ok(_localization.GetParentalRatings());
     }
 
@@ -79,6 +82,7 @@ public class LocalizationController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<IEnumerable<LocalizationOption>> GetLocalizationOptions()
     {
+        Response.Headers.CacheControl = "public, max-age=86400";
         return Ok(_localization.GetLocalizationOptions());
     }
 }

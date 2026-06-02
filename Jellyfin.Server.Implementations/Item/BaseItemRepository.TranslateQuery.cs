@@ -359,6 +359,7 @@ public sealed partial class BaseItemRepository
         if (filter.PersonIds.Length > 0)
         {
             var peopleEntityIds = context.BaseItems
+                .AsNoTracking()
                 .WhereOneOrMany(filter.PersonIds, b => b.Id)
                 .Join(
                     context.Peoples,
@@ -468,7 +469,7 @@ public sealed partial class BaseItemRepository
                         .AsNoTracking()
                         .Where(e => !e.IsFolder && !e.IsVirtualItem && e.SeriesId.HasValue)
                         .GroupBy(e => e.SeriesId!.Value)
-                        .Where(g => !g.Any(e => !e.UserData!.Any(ud => ud.UserId == userId && ud.Played)))
+                        .Where(g => g.All(e => e.UserData!.Any(ud => ud.UserId == userId && ud.Played)))
                         .Select(g => g.Key)
                     : Enumerable.Empty<Guid>().AsQueryable();
 
@@ -482,6 +483,7 @@ public sealed partial class BaseItemRepository
 
                 // Non-folder items: check UserData directly
                 var playedItemIds = context.UserData
+                    .AsNoTracking()
                     .Where(ud => ud.UserId == userId && ud.Played)
                     .Select(ud => ud.ItemId);
 
@@ -503,6 +505,7 @@ public sealed partial class BaseItemRepository
             else
             {
                 var playedItemIds = context.UserData
+                    .AsNoTracking()
                     .Where(ud => ud.UserId == filter.User!.Id && ud.Played)
                     .Select(ud => ud.ItemId);
                 var isPlayedItem = filter.IsPlayed.Value;
@@ -541,6 +544,7 @@ public sealed partial class BaseItemRepository
 
                 // Non-series items: resumable if PlaybackPositionTicks > 0
                 var resumableItemIds = context.UserData
+                    .AsNoTracking()
                     .Where(ud => ud.UserId == userId && ud.PlaybackPositionTicks > 0)
                     .Select(ud => ud.ItemId);
 
@@ -551,6 +555,7 @@ public sealed partial class BaseItemRepository
             else
             {
                 var resumableItemIds = context.UserData
+                    .AsNoTracking()
                     .Where(ud => ud.UserId == filter.User!.Id && ud.PlaybackPositionTicks > 0)
                     .Select(ud => ud.ItemId);
                 var isResumable = filter.IsResumable.Value;
@@ -571,6 +576,7 @@ public sealed partial class BaseItemRepository
         if (filter.ContributingArtistIds.Length > 0)
         {
             var contributingNames = context.BaseItems
+                .AsNoTracking()
                 .Where(b => filter.ContributingArtistIds.Contains(b.Id))
                 .Select(b => b.CleanName);
 
@@ -1127,6 +1133,7 @@ public sealed partial class BaseItemRepository
         if (filter.HasSpecialFeature.HasValue)
         {
             var itemsWithExtras = context.BaseItems
+                .AsNoTracking()
                 .Where(extra => extra.OwnerId != null
                     && extra.ExtraType != null
                     && extra.ExtraType != BaseItemExtraType.Unknown
@@ -1146,6 +1153,7 @@ public sealed partial class BaseItemRepository
         if (filter.HasTrailer.HasValue)
         {
             var trailerOwnerIds = context.BaseItems
+                .AsNoTracking()
                 .Where(extra => extra.ExtraType == BaseItemExtraType.Trailer && extra.OwnerId != null)
                 .Select(extra => extra.OwnerId!.Value);
 
@@ -1159,6 +1167,7 @@ public sealed partial class BaseItemRepository
         if (filter.HasThemeSong.HasValue)
         {
             var themeSongOwnerIds = context.BaseItems
+                .AsNoTracking()
                 .Where(extra => extra.ExtraType == BaseItemExtraType.ThemeSong && extra.OwnerId != null)
                 .Select(extra => extra.OwnerId!.Value);
 
@@ -1172,6 +1181,7 @@ public sealed partial class BaseItemRepository
         if (filter.HasThemeVideo.HasValue)
         {
             var themeVideoOwnerIds = context.BaseItems
+                .AsNoTracking()
                 .Where(extra => extra.ExtraType == BaseItemExtraType.ThemeVideo && extra.OwnerId != null)
                 .Select(extra => extra.OwnerId!.Value);
 

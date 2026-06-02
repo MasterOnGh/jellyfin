@@ -50,6 +50,7 @@ using MediaBrowser.Model.Library;
 using MediaBrowser.Model.Querying;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
+using Prometheus;
 using Episode = MediaBrowser.Controller.Entities.TV.Episode;
 using EpisodeInfo = Emby.Naming.TV.EpisodeInfo;
 using Genre = MediaBrowser.Controller.Entities.Genre;
@@ -89,6 +90,11 @@ namespace Emby.Server.Implementations.Library
         private readonly FastConcurrentLru<Guid, BaseItem> _cache;
         private readonly DotIgnoreIgnoreRule _dotIgnoreIgnoreRule;
         private readonly IMediaStreamRepository _mediaStreamRepository;
+
+        private static readonly Histogram _postScanTaskDuration = Metrics.CreateHistogram(
+            "jellyfin_library_post_scan_task_seconds",
+            "Time spent running library post-scan tasks.",
+            new HistogramConfiguration { LabelNames = ["task"], Buckets = Histogram.ExponentialBuckets(0.01, 2, 16) });
 
         /// <summary>
         /// The _root folder sync lock.
@@ -1450,48 +1456,44 @@ namespace Emby.Server.Implementations.Library
         private async Task RunPostScanTasks(IProgress<double> progress, CancellationToken cancellationToken)
         {
             var tasks = PostScanTasks.ToList();
-
-            var numComplete = 0;
-            var numTasks = tasks.Count;
-
-            foreach (var task in tasks)
+            var parallelismLimit = _configurationManager.Configuration.PostScanParallelismLimit;
+            if (parallelismLimit < 1)
             {
-                // Prevent access to modified closure
-                var currentNumComplete = numComplete;
-
-                var innerProgress = new Progress<double>(pct =>
-                {
-                    double innerPercent = pct;
-                    innerPercent /= 100;
-                    innerPercent += currentNumComplete;
-
-                    innerPercent /= numTasks;
-                    innerPercent *= 100;
-
-                    progress.Report(innerPercent);
-                });
-
-                _logger.LogDebug("Running post-scan task {0}", task.GetType().Name);
-
-                try
-                {
-                    await task.Run(innerProgress, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogInformation("Post-scan task cancelled: {0}", task.GetType().Name);
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error running post-scan task");
-                }
-
-                numComplete++;
-                double percent = numComplete;
-                percent /= numTasks;
-                progress.Report(percent * 100);
+                parallelismLimit = Environment.ProcessorCount;
             }
+
+            // Run all post-scan tasks in parallel — they are independent cleanup/maintenance
+            // operations (genre cleanup, person validation, playlist validation, etc.).
+            // Individual failures are caught per-task so a single failure does not abort the rest.
+            using var parallelism = new SemaphoreSlim(parallelismLimit);
+            var taskRunners = tasks.Select(task => Task.Run(
+                async () =>
+                {
+                    await parallelism.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    var taskName = task.GetType().Name;
+                    _logger.LogDebug("Running post-scan task {TaskName}", taskName);
+                    try
+                    {
+                        using var timer = _postScanTaskDuration.WithLabels(taskName).NewTimer();
+                        await task.Run(new Progress<double>(), cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogInformation("Post-scan task cancelled: {TaskName}", taskName);
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error running post-scan task {TaskName}", taskName);
+                    }
+                    finally
+                    {
+                        parallelism.Release();
+                    }
+                },
+                cancellationToken));
+
+            await Task.WhenAll(taskRunners).ConfigureAwait(false);
 
             _persistenceService.UpdateInheritedValues();
 

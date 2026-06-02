@@ -641,18 +641,18 @@ namespace Emby.Server.Implementations.Session
             }
         }
 
-        private async void CheckForIdlePlayback(object state)
+        // Timer callbacks must be void — delegate to async Task methods to avoid async void.
+        private void CheckForIdlePlayback(object state) => _ = CheckForIdlePlaybackAsync();
+
+        private async Task CheckForIdlePlaybackAsync()
         {
-            var playingSessions = Sessions.Where(i => i.NowPlayingItem is not null)
-                .ToList();
+            var hasPlayingSessions = false;
 
-            if (playingSessions.Count > 0)
+            foreach (var session in Sessions.Where(i => i.NowPlayingItem is not null))
             {
-                var idle = playingSessions
-                    .Where(i => (DateTime.UtcNow - i.LastPlaybackCheckIn).TotalMinutes > 5)
-                    .ToList();
+                hasPlayingSessions = true;
 
-                foreach (var session in idle)
+                if ((DateTime.UtcNow - session.LastPlaybackCheckIn).TotalMinutes > 5)
                 {
                     _logger.LogDebug("Session {0} has gone idle while playing", session.Id);
 
@@ -673,20 +673,22 @@ namespace Emby.Server.Implementations.Session
                     }
                 }
             }
-            else
+
+            if (!hasPlayingSessions)
             {
                 StopIdleCheckTimer();
             }
         }
 
-        private async void CheckForInactiveSteams(object state)
-        {
-            var inactiveSessions = Sessions.Where(i =>
-                    i.NowPlayingItem is not null
-                    && i.PlayState.IsPaused
-                    && (DateTime.UtcNow - i.LastPausedDate).Value.TotalMinutes > _config.Configuration.InactiveSessionThreshold);
+        // Timer callbacks must be void — delegate to async Task methods to avoid async void.
+        private void CheckForInactiveSteams(object state) => _ = CheckForInactiveStreamsAsync();
 
-            foreach (var session in inactiveSessions)
+        private async Task CheckForInactiveStreamsAsync()
+        {
+            foreach (var session in Sessions.Where(i =>
+                i.NowPlayingItem is not null
+                && i.PlayState.IsPaused
+                && (DateTime.UtcNow - i.LastPausedDate).Value.TotalMinutes > _config.Configuration.InactiveSessionThreshold))
             {
                 _logger.LogDebug("Session {Session} has been inactive for {InactiveTime} minutes. Stopping it.", session.Id, _config.Configuration.InactiveSessionThreshold);
 
@@ -695,13 +697,13 @@ namespace Emby.Server.Implementations.Session
                     await SendPlaystateCommand(
                         session.Id,
                         session.Id,
-                        new PlaystateRequest()
+                        new PlaystateRequest
                         {
                             Command = PlaystateCommand.Stop,
                             ControllingUserId = session.UserId.ToString(),
                             SeekPositionTicks = session.PlayState?.PositionTicks
                         },
-                        CancellationToken.None).ConfigureAwait(true);
+                        CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -709,9 +711,7 @@ namespace Emby.Server.Implementations.Session
                 }
             }
 
-            bool playingSessions = Sessions.Any(i => i.NowPlayingItem is not null);
-
-            if (!playingSessions)
+            if (!Sessions.Any(i => i.NowPlayingItem is not null))
             {
                 StopInactiveCheckTimer();
             }

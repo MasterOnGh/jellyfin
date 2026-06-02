@@ -9,6 +9,7 @@ using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Session;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Emby.Server.Implementations.EntryPoints
 {
@@ -22,6 +23,7 @@ namespace Emby.Server.Implementations.EntryPoints
         private readonly ISessionManager _sessionManager;
         private readonly IUserDataManager _userDataManager;
         private readonly IUserManager _userManager;
+        private readonly ILogger<UserDataChangeNotifier> _logger;
 
         private readonly Dictionary<Guid, List<BaseItem>> _changedItems = new();
         private readonly Lock _syncLock = new();
@@ -34,14 +36,17 @@ namespace Emby.Server.Implementations.EntryPoints
         /// <param name="userDataManager">The <see cref="IUserDataManager"/>.</param>
         /// <param name="sessionManager">The <see cref="ISessionManager"/>.</param>
         /// <param name="userManager">The <see cref="IUserManager"/>.</param>
+        /// <param name="logger">The <see cref="ILogger{UserDataChangeNotifier}"/>.</param>
         public UserDataChangeNotifier(
             IUserDataManager userDataManager,
             ISessionManager sessionManager,
-            IUserManager userManager)
+            IUserManager userManager,
+            ILogger<UserDataChangeNotifier> logger)
         {
             _userDataManager = userDataManager;
             _sessionManager = sessionManager;
             _userManager = userManager;
+            _logger = logger;
         }
 
         /// <inheritdoc />
@@ -105,7 +110,10 @@ namespace Emby.Server.Implementations.EntryPoints
             }
         }
 
-        private async void UpdateTimerCallback(object? state)
+        private void UpdateTimerCallback(object? state)
+            => _ = UpdateTimerCallbackAsync(state);
+
+        private async Task UpdateTimerCallbackAsync(object? state)
         {
             List<KeyValuePair<Guid, List<BaseItem>>> changes;
             lock (_syncLock)
@@ -121,13 +129,20 @@ namespace Emby.Server.Implementations.EntryPoints
                 }
             }
 
-            foreach (var (userId, changedItems) in changes)
+            try
             {
-                await _sessionManager.SendMessageToUserSessions(
-                    [userId],
-                    SessionMessageType.UserDataChanged,
-                    () => GetUserDataChangeInfo(userId, changedItems),
-                    default).ConfigureAwait(false);
+                foreach (var (userId, changedItems) in changes)
+                {
+                    await _sessionManager.SendMessageToUserSessions(
+                        [userId],
+                        SessionMessageType.UserDataChanged,
+                        () => GetUserDataChangeInfo(userId, changedItems),
+                        default).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending UserDataChanged notifications");
             }
         }
 

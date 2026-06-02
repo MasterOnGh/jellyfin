@@ -126,8 +126,9 @@ public sealed class LibraryChangedNotifier : IHostedService, IDisposable
         {
             _sessionManager.SendMessageToAdminSessions(SessionMessageType.RefreshProgress, dict, CancellationToken.None);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogDebug(ex, "Error sending RefreshProgress message to admin sessions");
         }
 
         var collectionFolders = _libraryManager.GetCollectionFolders(item);
@@ -144,8 +145,9 @@ public sealed class LibraryChangedNotifier : IHostedService, IDisposable
             {
                 _sessionManager.SendMessageToAdminSessions(SessionMessageType.RefreshProgress, collectionFolderDict, CancellationToken.None);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Error sending RefreshProgress message to admin sessions for collection folder");
             }
         }
     }
@@ -202,7 +204,10 @@ public sealed class LibraryChangedNotifier : IHostedService, IDisposable
         }
     }
 
-    private async void LibraryUpdateTimerCallback(object? state)
+    private void LibraryUpdateTimerCallback(object? state)
+        => _ = LibraryUpdateTimerCallbackAsync(state);
+
+    private async Task LibraryUpdateTimerCallbackAsync(object? state)
     {
         List<Folder> foldersAddedTo;
         List<Folder> foldersRemovedFrom;
@@ -241,7 +246,14 @@ public sealed class LibraryChangedNotifier : IHostedService, IDisposable
             _foldersRemovedFrom.Clear();
         }
 
-        await SendChangeNotifications(itemsAdded, itemsUpdated, itemsRemoved, foldersAddedTo, foldersRemovedFrom, CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await SendChangeNotifications(itemsAdded, itemsUpdated, itemsRemoved, foldersAddedTo, foldersRemovedFrom, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending library change notifications");
+        }
     }
 
     private async Task SendChangeNotifications(

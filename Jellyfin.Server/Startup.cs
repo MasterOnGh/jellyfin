@@ -1,6 +1,8 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -8,6 +10,7 @@ using System.Net.Mime;
 using System.Text;
 using Emby.Server.Implementations.EntryPoints;
 using Emby.Server.Implementations.Localization;
+using Jellyfin.Api.Helpers;
 using Jellyfin.Api.Middleware;
 using Jellyfin.Database.Implementations;
 using Jellyfin.LiveTv.Extensions;
@@ -18,13 +21,16 @@ using Jellyfin.Networking.HappyEyeballs;
 using Jellyfin.Server.Extensions;
 using Jellyfin.Server.HealthChecks;
 using Jellyfin.Server.Implementations.Extensions;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Extensions;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.XbmcMetadata;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Localization;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,7 +68,38 @@ namespace Jellyfin.Server
         /// <param name="services">The service collection.</param>
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddResponseCompression();
+            services.AddResponseCompression(options =>
+            {
+                options.EnableForHttps = true;
+                options.Providers.Add<BrotliCompressionProvider>();
+                options.Providers.Add<GzipCompressionProvider>();
+                options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+                {
+                    "application/json",
+                    "application/javascript",
+                    "text/css",
+                    "image/svg+xml",
+                    "application/x-mpegURL",
+                });
+            });
+            services.Configure<BrotliCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
+            services.Configure<GzipCompressionProviderOptions>(o => o.Level = CompressionLevel.Fastest);
+
+            var redisConn = _serverConfigurationManager.GetEncodingOptions().RedisSegmentCacheConnectionString;
+            if (!string.IsNullOrWhiteSpace(redisConn))
+            {
+                services.AddStackExchangeRedisCache(o => o.Configuration = redisConn);
+                services.AddSingleton<ISegmentCacheService, SegmentCacheService>();
+                if (_serverConfigurationManager.GetEncodingOptions().RedisSegmentCacheMode == RedisSegmentCacheMode.Required)
+                {
+                    services.AddHostedService<RedisSegmentCacheStartupValidator>();
+                }
+            }
+            else
+            {
+                services.AddSingleton<ISegmentCacheService, NullSegmentCacheService>();
+            }
+
             services.AddHttpContextAccessor();
             services.AddHttpsRedirection(options =>
             {
@@ -218,7 +255,11 @@ namespace Jellyfin.Server
                         {
                             if (Path.GetFileName(context.File.Name).Equals("index.html", StringComparison.Ordinal))
                             {
-                                context.Context.Response.Headers.CacheControl = new StringValues("no-cache");
+                                context.Context.Response.Headers.CacheControl = new StringValues("no-cache, no-store, must-revalidate");
+                            }
+                            else
+                            {
+                                context.Context.Response.Headers.CacheControl = new StringValues("public, max-age=31536000, immutable");
                             }
                         }
                     });

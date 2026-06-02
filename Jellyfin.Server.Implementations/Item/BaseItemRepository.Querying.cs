@@ -227,7 +227,8 @@ public sealed partial class BaseItemRepository
         var topSeriesData = topSeriesWithDates
             .Select(g => new { g.SeriesName, g.MaxDate })
             .ToList();
-        var topSeriesNames = topSeriesData.Select(g => g.SeriesName).ToList();
+        // Use HashSet for O(1) .Contains() instead of O(N) on List<string>.
+        var topSeriesNames = topSeriesData.Select(g => g.SeriesName).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Compute a global date cutoff: the oldest series' max date minus the window.
         // Episodes before this cutoff cannot be in any series' "recent additions" window,
@@ -483,12 +484,49 @@ public sealed partial class BaseItemRepository
         {
             var descendantIds = DescendantQueryHelper.GetAllDescendantIds(dbContext, id);
 
-            return dbContext.BaseItems
-                    .Where(e => descendantIds.Contains(e.Id) && !e.IsFolder && !e.IsVirtualItem)
-                    .All(f => f.UserData!.Any(e => e.UserId == user.Id && e.Played));
+            // Use two aggregate SQL queries instead of N correlated sub-queries.
+            var leafItems = dbContext.BaseItems
+                .AsNoTracking()
+                .Where(e => descendantIds.Contains(e.Id) && !e.IsFolder && !e.IsVirtualItem);
+
+            var totalCount = leafItems.Count();
+            if (totalCount == 0)
+            {
+                return true;
+            }
+
+            var playedCount = dbContext.UserData
+                .AsNoTracking()
+                .Where(ud => ud.UserId == user.Id
+                          && ud.Played
+                          && leafItems.Select(e => e.Id).Contains(ud.ItemId))
+                .Select(ud => ud.ItemId)
+                .Distinct()
+                .Count();
+
+            return totalCount == playedCount;
         }
 
-        return dbContext.BaseItems.Where(e => e.ParentId == id).All(f => f.UserData!.Any(e => e.UserId == user.Id && e.Played));
+        var directItems = dbContext.BaseItems
+            .AsNoTracking()
+            .Where(e => e.ParentId == id && !e.IsFolder && !e.IsVirtualItem);
+
+        var directTotal = directItems.Count();
+        if (directTotal == 0)
+        {
+            return true;
+        }
+
+        var directPlayedCount = dbContext.UserData
+            .AsNoTracking()
+            .Where(ud => ud.UserId == user.Id
+                      && ud.Played
+                      && directItems.Select(e => e.Id).Contains(ud.ItemId))
+            .Select(ud => ud.ItemId)
+            .Distinct()
+            .Count();
+
+        return directTotal == directPlayedCount;
     }
 
     /// <inheritdoc />

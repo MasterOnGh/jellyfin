@@ -274,6 +274,23 @@ public class ServerConfiguration : BaseApplicationConfiguration
     public int ParallelImageEncodingLimit { get; set; }
 
     /// <summary>
+    /// Gets or sets the maximum number of processed image cache entries held in memory.
+    /// </summary>
+    public int ProcessedImageCacheSizeLimit { get; set; } = 10000;
+
+    /// <summary>
+    /// Gets or sets the limit for parallel FFmpeg thumbnail extraction.
+    /// 0 = automatic (ProcessorCount × 2). FFmpeg extraction is I/O-bound so benefits from a higher limit than image encoding.
+    /// </summary>
+    /// <value>The limit for parallel thumbnail extraction.</value>
+    public int ParallelThumbnailExtractionLimit { get; set; }
+
+    /// <summary>
+    /// Gets or sets the limit for post-scan task parallelism. 0 = automatic.
+    /// </summary>
+    public int PostScanParallelismLimit { get; set; }
+
+    /// <summary>
     /// Gets or sets the list of cast receiver applications.
     /// </summary>
     public CastReceiverApplication[] CastReceiverApplications { get; set; } = Array.Empty<CastReceiverApplication>();

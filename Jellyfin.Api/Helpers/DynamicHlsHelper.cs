@@ -135,7 +135,7 @@ public class DynamicHlsHelper
                 cancellationTokenSource.Token)
             .ConfigureAwait(false);
 
-        _httpContextAccessor.HttpContext.Response.Headers.Append(HeaderNames.Expires, "0");
+        // ETag / conditional request handling is done after playlist is built (see bottom of method).
         if (isHeadRequest)
         {
             return new FileContentResult(Array.Empty<byte>(), MimeTypes.GetMimeType("playlist.m3u8"));
@@ -339,7 +339,23 @@ public class DynamicHlsHelper
             AddTrickplay(state, trickplayResolutions, builder, _httpContextAccessor.HttpContext.User);
         }
 
-        return new FileContentResult(Encoding.UTF8.GetBytes(builder.ToString()), MimeTypes.GetMimeType("playlist.m3u8"));
+        var playlistContent = builder.ToString();
+
+        // Compute ETag from playlist content so identical playlists return 304.
+        var playlistETag = $"\"{playlistContent.GetMD5():N}\"";
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext is not null)
+        {
+            if (string.Equals(httpContext.Request.Headers.IfNoneMatch.ToString(), playlistETag, StringComparison.Ordinal))
+            {
+                return new StatusCodeResult(StatusCodes.Status304NotModified);
+            }
+
+            httpContext.Response.Headers.ETag = playlistETag;
+            httpContext.Response.Headers.CacheControl = "no-cache";
+        }
+
+        return new FileContentResult(Encoding.UTF8.GetBytes(playlistContent), MimeTypes.GetMimeType("playlist.m3u8"));
     }
 
     private StringBuilder AppendPlaylist(StringBuilder builder, StreamState state, string url, int bitrate, string? subtitleGroup)
@@ -696,7 +712,7 @@ public class DynamicHlsHelper
                 30.ToString(CultureInfo.InvariantCulture),
                 user.GetToken());
 
-            var line = string.Format(
+            builder.AppendFormat(
                 CultureInfo.InvariantCulture,
                 Format,
                 name,
@@ -705,7 +721,7 @@ public class DynamicHlsHelper
                 url,
                 stream.Language ?? "Unknown");
 
-            builder.AppendLine(line);
+            builder.AppendLine();
         }
     }
 
