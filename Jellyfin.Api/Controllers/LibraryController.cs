@@ -551,6 +551,16 @@ public class LibraryController : BaseJellyfinApiController
             items = items.Where(i => i.IsHidden == val).ToList();
         }
 
+        var lastModified = items.Count > 0
+            ? items.Max(i => i.DateModified).ToUniversalTime()
+            : DateTime.UtcNow;
+        var eTag = $"\"{lastModified.Ticks:x}\"";
+
+        if (ConditionalRequestHelper.ShouldReturnNotModified(HttpContext, eTag, lastModified, "no-cache"))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
         var dtoOptions = new DtoOptions();
         var resultArray = _dtoService.GetBaseItemDtos(items, dtoOptions);
         return new QueryResult<BaseItemDto>(resultArray);

@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
@@ -114,6 +115,25 @@ public class PersonsController : BaseJellyfinApiController
             StartIndex = startIndex,
             Limit = limit ?? 0
         });
+
+        var lastModifiedPersons = peopleItems.Items.Count > 0
+            ? peopleItems.Items.Max(i => i.DateModified).ToUniversalTime()
+            : DateTime.UtcNow;
+        var eTagPersons = $"\"{peopleItems.TotalRecordCount:x}-{lastModifiedPersons.Ticks:x}\"";
+        if (string.Equals(Request.Headers.IfNoneMatch.ToString(), eTagPersons, StringComparison.Ordinal))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        if (DateTime.TryParse(Request.Headers.IfModifiedSince.ToString(), out var ifModifiedSincePersons)
+            && lastModifiedPersons <= ifModifiedSincePersons.ToUniversalTime())
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        Response.Headers.ETag = eTagPersons;
+        Response.Headers.LastModified = lastModifiedPersons.ToString("ddd, dd MMM yyyy HH:mm:ss \"GMT\"", CultureInfo.InvariantCulture);
+        Response.Headers.CacheControl = "no-cache";
 
         return new QueryResult<BaseItemDto>(
             peopleItems.StartIndex,

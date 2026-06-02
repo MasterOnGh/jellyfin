@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
@@ -142,6 +143,25 @@ public class GenresController : BaseJellyfinApiController
         {
             result = _libraryManager.GetGenres(query);
         }
+
+        var lastModifiedGenres = result.Items.Count > 0
+            ? result.Items.Max(i => i.Item1.DateModified).ToUniversalTime()
+            : DateTime.UtcNow;
+        var eTagGenres = $"\"{result.TotalRecordCount:x}-{lastModifiedGenres.Ticks:x}\"";
+        if (string.Equals(Request.Headers.IfNoneMatch.ToString(), eTagGenres, StringComparison.Ordinal))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        if (DateTime.TryParse(Request.Headers.IfModifiedSince.ToString(), out var ifModifiedSinceGenres)
+            && lastModifiedGenres <= ifModifiedSinceGenres.ToUniversalTime())
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        Response.Headers.ETag = eTagGenres;
+        Response.Headers.LastModified = lastModifiedGenres.ToString("ddd, dd MMM yyyy HH:mm:ss \"GMT\"", CultureInfo.InvariantCulture);
+        Response.Headers.CacheControl = "no-cache";
 
         var shouldIncludeItemTypes = includeItemTypes.Length != 0;
         return RequestHelpers.CreateQueryResult(result, dtoOptions, _dtoService, shouldIncludeItemTypes, user);

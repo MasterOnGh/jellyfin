@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
@@ -193,6 +194,25 @@ public class ArtistsController : BaseJellyfinApiController
 
         var result = _libraryManager.GetArtists(query);
 
+        var lastModifiedArtists = result.Items.Count > 0
+            ? result.Items.Max(i => i.Item.DateModified).ToUniversalTime()
+            : DateTime.UtcNow;
+        var eTagArtists = $"\"{result.TotalRecordCount:x}-{lastModifiedArtists.Ticks:x}\"";
+        if (string.Equals(Request.Headers.IfNoneMatch.ToString(), eTagArtists, StringComparison.Ordinal))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        if (DateTime.TryParse(Request.Headers.IfModifiedSince.ToString(), out var ifModifiedSinceArtists)
+            && lastModifiedArtists <= ifModifiedSinceArtists.ToUniversalTime())
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        Response.Headers.ETag = eTagArtists;
+        Response.Headers.LastModified = lastModifiedArtists.ToString("ddd, dd MMM yyyy HH:mm:ss \"GMT\"", CultureInfo.InvariantCulture);
+        Response.Headers.CacheControl = "no-cache";
+
         var dtos = result.Items.Select(i =>
         {
             var (baseItem, itemCounts) = i;
@@ -364,6 +384,25 @@ public class ArtistsController : BaseJellyfinApiController
         query.ApplyFilters(filters);
 
         var result = _libraryManager.GetAlbumArtists(query);
+
+        var lastModifiedAlbumArtists = result.Items.Count > 0
+            ? result.Items.Max(i => i.Item.DateModified).ToUniversalTime()
+            : DateTime.UtcNow;
+        var eTagAlbumArtists = $"\"{result.TotalRecordCount:x}-{lastModifiedAlbumArtists.Ticks:x}\"";
+        if (string.Equals(Request.Headers.IfNoneMatch.ToString(), eTagAlbumArtists, StringComparison.Ordinal))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        if (DateTime.TryParse(Request.Headers.IfModifiedSince.ToString(), out var ifModifiedSinceAlbumArtists)
+            && lastModifiedAlbumArtists <= ifModifiedSinceAlbumArtists.ToUniversalTime())
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        Response.Headers.ETag = eTagAlbumArtists;
+        Response.Headers.LastModified = lastModifiedAlbumArtists.ToString("ddd, dd MMM yyyy HH:mm:ss \"GMT\"", CultureInfo.InvariantCulture);
+        Response.Headers.CacheControl = "no-cache";
 
         var dtos = result.Items.Select(i =>
         {

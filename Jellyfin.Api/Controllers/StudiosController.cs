@@ -1,5 +1,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
+using System.Linq;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Api.ModelBinders;
@@ -126,6 +128,26 @@ public class StudiosController : BaseJellyfinApiController
         }
 
         var result = _libraryManager.GetStudios(query);
+
+        var lastModifiedStudios = result.Items.Count > 0
+            ? result.Items.Max(i => i.Item.DateModified).ToUniversalTime()
+            : DateTime.UtcNow;
+        var eTagStudios = $"\"{result.TotalRecordCount:x}-{lastModifiedStudios.Ticks:x}\"";
+        if (string.Equals(Request.Headers.IfNoneMatch.ToString(), eTagStudios, StringComparison.Ordinal))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        if (DateTime.TryParse(Request.Headers.IfModifiedSince.ToString(), out var ifModifiedSinceStudios)
+            && lastModifiedStudios <= ifModifiedSinceStudios.ToUniversalTime())
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        Response.Headers.ETag = eTagStudios;
+        Response.Headers.LastModified = lastModifiedStudios.ToString("ddd, dd MMM yyyy HH:mm:ss \"GMT\"", CultureInfo.InvariantCulture);
+        Response.Headers.CacheControl = "no-cache";
+
         var shouldIncludeItemTypes = includeItemTypes.Length != 0;
         return RequestHelpers.CreateQueryResult(result, dtoOptions, _dtoService, shouldIncludeItemTypes, user);
     }
