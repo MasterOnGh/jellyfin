@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <PackageReference Include="AsyncKeyedLock" />
+    <PackageReference Include="prometheus-net" />
   </ItemGroup>
 
 </Project>
