@@ -1148,41 +1148,53 @@ namespace MediaBrowser.Providers.Manager
 
             var cancellationToken = _disposeCancellationTokenSource.Token;
 
-            libraryManager.ClearIgnoreRuleCache();
-            while (_refreshQueue.TryDequeue(out var refreshItem, out _))
+            try
             {
-                if (_disposed)
+                libraryManager.ClearIgnoreRuleCache();
+                while (_refreshQueue.TryDequeue(out var refreshItem, out _))
                 {
-                    return;
-                }
-
-                try
-                {
-                    var item = libraryManager.GetItemById(refreshItem.ItemId);
-                    if (item is null)
+                    if (_disposed)
                     {
-                        continue;
+                        return;
                     }
 
-                    var task = item is MusicArtist artist
-                        ? RefreshArtist(artist, refreshItem.RefreshOptions, cancellationToken)
-                        : RefreshItem(item, refreshItem.RefreshOptions, cancellationToken);
+                    try
+                    {
+                        var item = libraryManager.GetItemById(refreshItem.ItemId);
+                        if (item is null)
+                        {
+                            continue;
+                        }
 
-                    await task.ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error refreshing item");
+                        var task = item is MusicArtist artist
+                            ? RefreshArtist(artist, refreshItem.RefreshOptions, cancellationToken)
+                            : RefreshItem(item, refreshItem.RefreshOptions, cancellationToken);
+
+                        await task.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error refreshing item");
+                    }
                 }
             }
-
-            lock (_refreshQueueLock)
+            catch (Exception ex)
             {
-                _isProcessingRefreshQueue = false;
+                // Guard against any unexpected failure escaping the processing loop so the
+                // queue does not stay permanently blocked with _isProcessingRefreshQueue = true.
+                _logger.LogError(ex, "Unexpected error while processing the metadata refresh queue");
+            }
+            finally
+            {
+                lock (_refreshQueueLock)
+                {
+                    _isProcessingRefreshQueue = false;
+                }
+
                 libraryManager.ClearIgnoreRuleCache();
             }
         }

@@ -255,7 +255,22 @@ public class ScheduledTaskWorker : IScheduledTaskWorker
     /// </summary>
     /// <param name="sender">The source of the event.</param>
     /// <param name="e">The <see cref="EventArgs" /> instance containing the event data.</param>
-    private async void OnTriggerTriggered(object sender, EventArgs e)
+    private void OnTriggerTriggered(object sender, EventArgs e)
+        => _ = OnTriggerTriggeredAsync(sender, e);
+
+    private async Task OnTriggerTriggeredAsync(object sender, EventArgs e)
+    {
+        try
+        {
+            await OnTriggerTriggeredInternalAsync(sender, e).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error handling fired trigger for task: {Name}", Name);
+        }
+    }
+
+    private async Task OnTriggerTriggeredInternalAsync(object sender, EventArgs e)
     {
         var trigger = (ITaskTrigger)sender;
 

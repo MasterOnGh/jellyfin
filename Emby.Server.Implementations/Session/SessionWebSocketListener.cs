@@ -204,7 +204,22 @@ namespace Emby.Server.Implementations.Session
         /// <summary>
         /// Checks status of KeepAlive of WebSockets.
         /// </summary>
-        private async void KeepAliveSockets(object? o, EventArgs? e)
+        private void KeepAliveSockets(object? o, EventArgs? e)
+            => _ = KeepAliveSocketsAsync();
+
+        private async Task KeepAliveSocketsAsync()
+        {
+            try
+            {
+                await KeepAliveSocketsInternalAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during WebSocket keep-alive check");
+            }
+        }
+
+        private async Task KeepAliveSocketsInternalAsync()
         {
             List<IWebSocketConnection> inactive;
             List<IWebSocketConnection> lost;
