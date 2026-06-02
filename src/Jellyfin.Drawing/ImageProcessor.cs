@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -20,7 +22,9 @@ using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Net;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Prometheus;
 using Photo = MediaBrowser.Controller.Entities.Photo;
 
 namespace Jellyfin.Drawing;
@@ -40,8 +44,21 @@ public sealed class ImageProcessor : IImageProcessor, IDisposable
     private readonly IFileSystem _fileSystem;
     private readonly IServerApplicationPaths _appPaths;
     private readonly IImageEncoder _imageEncoder;
+    private readonly IMemoryCache _processedImageCache;
+    private readonly bool _ownsProcessedImageCache;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _cacheFileLocks = new(StringComparer.Ordinal);
 
     private readonly AsyncNonKeyedLocker _parallelEncodingLimit;
+
+    private static readonly Counter _processedImageCacheReads = Metrics.CreateCounter(
+        "jellyfin_image_processed_cache_reads_total",
+        "Total processed image memory cache reads.",
+        new CounterConfiguration { LabelNames = ["result"] });
+
+    private static readonly Histogram _imageEncodingDuration = Metrics.CreateHistogram(
+        "jellyfin_image_encoding_seconds",
+        "Time spent encoding processed images.",
+        new HistogramConfiguration { Buckets = Histogram.ExponentialBuckets(0.005, 2, 14) });
 
     private bool _disposed;
 
@@ -53,17 +70,29 @@ public sealed class ImageProcessor : IImageProcessor, IDisposable
     /// <param name="fileSystem">The filesystem.</param>
     /// <param name="imageEncoder">The image encoder.</param>
     /// <param name="config">The configuration.</param>
+    /// <param name="memoryCache">The memory cache for recently processed image paths.</param>
     public ImageProcessor(
         ILogger<ImageProcessor> logger,
         IServerApplicationPaths appPaths,
         IFileSystem fileSystem,
         IImageEncoder imageEncoder,
-        IServerConfigurationManager config)
+        IServerConfigurationManager config,
+        IMemoryCache memoryCache)
     {
         _logger = logger;
         _fileSystem = fileSystem;
         _imageEncoder = imageEncoder;
         _appPaths = appPaths;
+        var cacheSizeLimit = config.Configuration.ProcessedImageCacheSizeLimit;
+        if (cacheSizeLimit > 0)
+        {
+            _processedImageCache = new MemoryCache(new MemoryCacheOptions { SizeLimit = cacheSizeLimit });
+            _ownsProcessedImageCache = true;
+        }
+        else
+        {
+            _processedImageCache = memoryCache;
+        }
 
         var semaphoreCount = config.Configuration.ParallelImageEncodingLimit;
         if (semaphoreCount < 1)
@@ -192,8 +221,26 @@ public sealed class ImageProcessor : IImageProcessor, IDisposable
             options.BackgroundColor,
             options.ForegroundLayer);
 
+        // Check in-memory cache before hitting the disk on every request.
+        // Cache key is already the unique MD5 path computed from all encoding parameters.
+        if (_processedImageCache.TryGetValue<(string Path, string? MimeType, DateTime DateModified)>(cacheFilePath, out var cached))
+        {
+            _processedImageCacheReads.WithLabels("hit").Inc();
+            return cached;
+        }
+
+        _processedImageCacheReads.WithLabels("miss").Inc();
+
+        var cacheFileLock = _cacheFileLocks.GetOrAdd(cacheFilePath, _ => new SemaphoreSlim(1, 1));
+        await cacheFileLock.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (_processedImageCache.TryGetValue<(string Path, string? MimeType, DateTime DateModified)>(cacheFilePath, out cached))
+            {
+                _processedImageCacheReads.WithLabels("hit_after_wait").Inc();
+                return cached;
+            }
+
             if (!File.Exists(cacheFilePath))
             {
                 string resultPath;
@@ -201,7 +248,9 @@ public sealed class ImageProcessor : IImageProcessor, IDisposable
                 // Limit number of parallel (more precisely: concurrent) image encodings to prevent a high memory usage
                 using (await _parallelEncodingLimit.LockAsync().ConfigureAwait(false))
                 {
+                    var stopwatch = Stopwatch.StartNew();
                     resultPath = _imageEncoder.EncodeImage(originalImagePath, dateModified, cacheFilePath, autoOrient, orientation, quality, options, outputFormat);
+                    _imageEncodingDuration.Observe(stopwatch.Elapsed.TotalSeconds);
                 }
 
                 if (string.Equals(resultPath, originalImagePath, StringComparison.OrdinalIgnoreCase))
@@ -210,13 +259,30 @@ public sealed class ImageProcessor : IImageProcessor, IDisposable
                 }
             }
 
-            return (cacheFilePath, outputFormat.GetMimeType(), _fileSystem.GetLastWriteTimeUtc(cacheFilePath));
+            var result = (cacheFilePath, outputFormat.GetMimeType(), _fileSystem.GetLastWriteTimeUtc(cacheFilePath));
+            _processedImageCache.Set(
+                cacheFilePath,
+                result,
+                new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = TimeSpan.FromMinutes(5),
+                    Size = 1
+                });
+            return result;
         }
         catch (Exception ex)
         {
             // If it fails for whatever reason, return the original image
             _logger.LogError(ex, "Error encoding image");
             return (originalImagePath, MimeTypes.GetMimeType(originalImagePath), dateModified);
+        }
+        finally
+        {
+            cacheFileLock.Release();
+            if (cacheFileLock.CurrentCount == 1)
+            {
+                _cacheFileLocks.TryRemove(cacheFilePath, out _);
+            }
         }
     }
 
@@ -544,6 +610,11 @@ public sealed class ImageProcessor : IImageProcessor, IDisposable
         }
 
         _parallelEncodingLimit?.Dispose();
+
+        if (_ownsProcessedImageCache && _processedImageCache is IDisposable disposableCache)
+        {
+            disposableCache.Dispose();
+        }
 
         _disposed = true;
     }

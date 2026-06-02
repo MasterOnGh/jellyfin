@@ -128,14 +128,16 @@ namespace MediaBrowser.MediaEncoding.Encoder
             _jsonSerializerOptions = new JsonSerializerOptions(JsonDefaults.Options);
             _jsonSerializerOptions.Converters.Add(new JsonBoolStringConverter());
 
-            // Although the type is not nullable, this might still be null during unit tests
-            var semaphoreCount = serverConfig.Configuration?.ParallelImageEncodingLimit ?? 0;
-            if (semaphoreCount < 1)
+            // Although the type is not nullable, this might still be null during unit tests.
+            // FFmpeg thumbnail extraction is I/O-bound (reads video, writes JPEG), so it benefits
+            // from a higher concurrency limit than CPU-bound image encoding.
+            var thumbnailCount = serverConfig.Configuration?.ParallelThumbnailExtractionLimit ?? 0;
+            if (thumbnailCount < 1)
             {
-                semaphoreCount = Environment.ProcessorCount;
+                thumbnailCount = Environment.ProcessorCount * 2;
             }
 
-            _thumbnailResourcePool = new(semaphoreCount);
+            _thumbnailResourcePool = new(thumbnailCount);
         }
 
         /// <inheritdoc />
