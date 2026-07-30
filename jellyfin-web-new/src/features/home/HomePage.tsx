@@ -12,6 +12,7 @@ import {
     withQuery
 } from '../catalog/catalog';
 import { catalogKeys } from '../catalog/queryKeys';
+import { isOfflineFallbackError } from '../../api';
 import { readMetadataSnapshot, writeMetadataSnapshot } from '../../pwa';
 import styles from './HomePage.module.css';
 
@@ -131,7 +132,7 @@ export function HomePage() {
                 void writeMetadataSnapshot(userId, profileId, 'home', home).catch(() => undefined);
                 return home;
             } catch (error) {
-                if (!navigator.onLine) {
+                if (!navigator.onLine || isOfflineFallbackError(error)) {
                     const snapshot = await readMetadataSnapshot<HomeResponse>(userId, profileId, 'home')
                         .catch(() => null);
                     if (snapshot) return snapshot;

@@ -3,6 +3,7 @@ import {
     type PropsWithChildren,
     useCallback,
     useContext,
+    useEffect,
     useMemo,
     useState
 } from 'react';
@@ -83,6 +84,8 @@ const messages = {
         continueWatching: 'Continue watching',
         delete: 'Delete',
         details: 'More info',
+        download: 'Download',
+        downloads: 'Downloads',
         edit: 'Edit',
         error: 'Something went wrong',
         errorDescription: 'The requested content could not be loaded.',
@@ -101,7 +104,7 @@ const messages = {
         newAndPopular: 'New & popular',
         nextEpisode: 'Next episode',
         noResults: 'Nothing here yet',
-        offline: 'You are offline. Playback and changes are unavailable.',
+        offline: 'You are offline. Downloaded content remains available.',
         password: 'Password',
         pause: 'Pause',
         pictureInPicture: 'Picture in picture',
@@ -205,6 +208,8 @@ const messages = {
         continueWatching: 'Continuer à regarder',
         delete: 'Supprimer',
         details: 'Plus d’infos',
+        download: 'Télécharger',
+        downloads: 'Téléchargements',
         edit: 'Modifier',
         error: 'Une erreur est survenue',
         errorDescription: 'Le contenu demandé n’a pas pu être chargé.',
@@ -223,7 +228,7 @@ const messages = {
         newAndPopular: 'Nouveautés',
         nextEpisode: 'Épisode suivant',
         noResults: 'Rien à afficher pour le moment',
-        offline: 'Vous êtes hors connexion. La lecture et les modifications sont indisponibles.',
+        offline: 'Vous êtes hors connexion. Les contenus téléchargés restent disponibles.',
         password: 'Mot de passe',
         pause: 'Pause',
         pictureInPicture: 'Image dans l’image',
@@ -288,9 +293,11 @@ export function I18nProvider({ children }: PropsWithChildren) {
     const [ locale, setLocaleState ] = useState<Locale>(initialLocale);
     const setLocale = useCallback((nextLocale: Locale) => {
         localStorage.setItem(STORAGE_KEY, nextLocale);
-        document.documentElement.lang = nextLocale;
         setLocaleState(nextLocale);
     }, []);
+    useEffect(() => {
+        document.documentElement.lang = locale;
+    }, [ locale ]);
     const value = useMemo<I18nValue>(() => ({
         locale,
         setLocale,

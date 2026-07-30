@@ -13,6 +13,8 @@ import {
     ApiError,
     createJellyfinClient,
     getDefaultApiBaseUrl,
+    isOfflineFallbackError,
+    toApiError,
     type JellyfinClient,
     type Profile,
     type PublicSystemInfo
@@ -111,8 +113,8 @@ export function SessionProvider({
                 if (active) setStatus('authenticated');
             } catch (cause) {
                 if (!active) return;
-                const apiError = cause instanceof ApiError ? cause : new ApiError('unknown');
-                if (initialSession && !navigator.onLine) {
+                const apiError = cause instanceof ApiError ? cause : toApiError(cause);
+                if (initialSession && isOfflineFallbackError(apiError)) {
                     setStatus('authenticated');
                     return;
                 }
@@ -120,6 +122,7 @@ export function SessionProvider({
                     sessionStorage.clearSession();
                     client.setAccessToken();
                     setSession(null);
+                    await purgeClientState?.();
                     setStatus('anonymous');
                 } else {
                     setError(apiError);
@@ -131,7 +134,7 @@ export function SessionProvider({
         return () => {
             active = false;
         };
-    }, [client, initialSession, sessionStorage]);
+    }, [client, initialSession, purgeClientState, sessionStorage]);
 
     const applyAuthentication = useCallback((result: AuthenticationResult) => {
         const nextSession = sessionFrom(result);
@@ -165,12 +168,13 @@ export function SessionProvider({
     );
 
     const logout = useCallback(async () => {
-        await client.reportSessionEnded();
+        void client.reportSessionEnded();
+        setStatus('loading');
         sessionStorage.clearSession();
         client.setAccessToken();
         setSession(null);
-        setStatus('anonymous');
         await purgeClientState?.();
+        setStatus('anonymous');
     }, [client, purgeClientState, sessionStorage]);
 
     const value = useMemo<SessionContextValue>(() => ({

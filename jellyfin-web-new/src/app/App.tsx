@@ -7,6 +7,10 @@ import { Button } from '../components/Button';
 import { I18nProvider, useI18n } from '../i18n';
 import { clearMetadataSnapshots, registerPwa, type InstallUpdate } from '../pwa';
 import { playerStore } from '../player';
+import {
+    deleteDownload,
+    list as listDownloads
+} from '../downloads';
 import { router } from './router';
 import styles from './App.module.css';
 
@@ -28,15 +32,11 @@ const queryClient = new QueryClient({
 async function purgeClientState() {
     queryClient.clear();
     playerStore.reset();
-    await clearMetadataSnapshots();
-    if ('caches' in window) {
-        const names = await caches.keys();
-        await Promise.all(
-            names
-                .filter(name => name.startsWith('jellyfin-web-new-'))
-                .map(name => caches.delete(name))
-        );
-    }
+    const downloads = await listDownloads().catch(() => []);
+    await Promise.allSettled([
+        clearMetadataSnapshots(),
+        ...downloads.map(download => deleteDownload(download.id))
+    ]);
 }
 
 function UpdatePrompt() {

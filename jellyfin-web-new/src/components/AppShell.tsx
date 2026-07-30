@@ -51,6 +51,13 @@ export function AppShell() {
                     {primaryNavigation.map(item => <NavigationLink {...item} key={item.to} />)}
                 </nav>
                 <div className={styles.actions}>
+                    <NavLink
+                        className={`${styles.iconLink ?? ''} ${styles.downloadLink ?? ''}`}
+                        to='/downloads'
+                        aria-label={t('downloads')}
+                    >
+                        <Icon name='download' />
+                    </NavLink>
                     <NavLink className={styles.iconLink ?? ''} to='/search' aria-label={t('search')}>
                         <Icon name='search' />
                     </NavLink>

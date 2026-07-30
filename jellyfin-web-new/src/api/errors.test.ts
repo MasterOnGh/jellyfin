@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { ApiError, parseRetryAfter, toApiError } from './errors';
+import {
+    ApiError,
+    isOfflineFallbackError,
+    parseRetryAfter,
+    toApiError
+} from './errors';
 
 describe('API errors', () => {
     it('preserves status, problem detail and Retry-After', () => {
@@ -25,8 +30,13 @@ describe('API errors', () => {
     });
 
     it('distinguishes network failures', () => {
-        expect(toApiError(new TypeError('offline'))).toEqual(expect.objectContaining({
+        const error = toApiError(new TypeError('offline'));
+        expect(error).toEqual(expect.objectContaining({
             code: 'network'
         } satisfies Partial<ApiError>));
+        expect(isOfflineFallbackError(error)).toBe(true);
+        expect(isOfflineFallbackError(new ApiError('unavailable', 503))).toBe(true);
+        expect(isOfflineFallbackError(new ApiError('unknown', 502))).toBe(true);
+        expect(isOfflineFallbackError(new ApiError('unauthorized', 401))).toBe(false);
     });
 });

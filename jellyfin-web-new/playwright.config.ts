@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5173';
+
 export default defineConfig({
     testDir: './tests/e2e',
     outputDir: './output/playwright/test-results',
@@ -11,14 +13,14 @@ export default defineConfig({
         [ 'html', { open: 'never', outputFolder: './output/playwright/report' } ]
     ],
     use: {
-        baseURL: 'http://127.0.0.1:5173',
+        baseURL,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
         video: 'retain-on-failure'
     },
     webServer: {
-        command: 'npm run dev',
-        url: 'http://127.0.0.1:5173',
+        command: process.env.PLAYWRIGHT_WEB_SERVER_COMMAND ?? 'npm run dev',
+        url: process.env.PLAYWRIGHT_WEB_SERVER_URL ?? baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000
     },

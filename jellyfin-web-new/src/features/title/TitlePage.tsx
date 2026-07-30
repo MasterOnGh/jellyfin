@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { useState } from 'react';
 
+import { isOfflineFallbackError } from '../../api';
 import { useOnlineStatus } from '../../app/useOnlineStatus';
 import {
     formatRuntime,
@@ -13,6 +14,8 @@ import {
     withQuery
 } from '../catalog/catalog';
 import { catalogKeys } from '../catalog/queryKeys';
+import { DownloadButton } from '../downloads/DownloadButton';
+import { useDownloadRecords } from '../downloads/useDownloads';
 import { FeedbackButtons } from '../feedback/FeedbackButtons';
 import { readMetadataSnapshot, writeMetadataSnapshot } from '../../pwa';
 import styles from './TitlePage.module.css';
@@ -73,6 +76,10 @@ export function TitlePage({ itemId: explicitItemId }: { itemId?: string }) {
     const { client, locale, profileId, userId } = useCatalog();
     const labels = text[locale];
     const scope = { profileId, userId };
+    const {
+        loading: downloadsLoading,
+        records: downloads
+    } = useDownloadRecords(userId, profileId);
     const queryClient = useQueryClient();
     const detailsKey = catalogKeys.item(scope, itemId);
     const details = useQuery({
@@ -87,7 +94,7 @@ export function TitlePage({ itemId: explicitItemId }: { itemId?: string }) {
                     .catch(() => undefined);
                 return value;
             } catch (error) {
-                if (!navigator.onLine) {
+                if (!navigator.onLine || isOfflineFallbackError(error)) {
                     const snapshot = await readMetadataSnapshot<DetailsResponse>(
                         userId,
                         profileId,
@@ -197,6 +204,9 @@ export function TitlePage({ itemId: explicitItemId }: { itemId?: string }) {
     const isInList = listStatus.data?.IsInMyList ?? false;
     const completed = details.data.Progress?.Completed ?? false;
     const playCopy = details.data.Progress?.PositionSeconds ? labels.resume : labels.play;
+    const downloadsByItem = new Map(downloads.map(download => [ download.itemId, download ]));
+    const itemDownload = downloadsByItem.get(itemId) ?? null;
+    const offlineDownload = itemDownload?.status === 'completed' ? itemDownload : null;
 
     return (
         <main className={styles.page}>
@@ -210,15 +220,22 @@ export function TitlePage({ itemId: explicitItemId }: { itemId?: string }) {
                 <p className={styles.metadata}>{metadata}</p>
                 <div className={styles.actions}>
                     <Link
-                        aria-disabled={!online}
+                        aria-disabled={!online && !offlineDownload}
                         className={styles.play}
                         onClick={event => {
-                            if (!online) event.preventDefault();
+                            if (!online && !offlineDownload) event.preventDefault();
                         }}
-                        to={`/watch/${item.Id}`}
+                        to={!online && offlineDownload
+                            ? `/offline-watch/${offlineDownload.id}`
+                            : `/watch/${item.Id}`}
                     >
                         {playCopy}
                     </Link>
+                    <DownloadButton
+                        item={item}
+                        loading={downloadsLoading}
+                        record={itemDownload}
+                    />
                     <button
                         aria-pressed={isInList}
                         disabled={!online || listStatus.isPending || listStatus.isError || listMutation.isPending}
@@ -274,6 +291,14 @@ export function TitlePage({ itemId: explicitItemId }: { itemId?: string }) {
                             <div className={styles.episodeGrid}>
                                 {episodes.data.Items.map(episode => episode.Id ? (
                                     <MediaCard
+                                        action={(
+                                            <DownloadButton
+                                                compact
+                                                item={episode}
+                                                loading={downloadsLoading}
+                                                record={downloadsByItem.get(episode.Id) ?? null}
+                                            />
+                                        )}
                                         item={episode}
                                         key={episode.Id}
                                         layout="landscape"

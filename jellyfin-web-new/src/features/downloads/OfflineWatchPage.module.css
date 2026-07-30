@@ -1,0 +1,92 @@
+.page {
+    position: fixed;
+    z-index: 100;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    color: #fafafa;
+    background: #000;
+}
+
+.page video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+}
+
+.top {
+    position: absolute;
+    z-index: 2;
+    inset: 0 0 auto;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: .8rem;
+    padding:
+        max(1rem, env(safe-area-inset-top))
+        max(1rem, env(safe-area-inset-right))
+        4rem
+        max(1rem, env(safe-area-inset-left));
+    background: linear-gradient(to bottom, rgb(0 0 0 / 88%), transparent);
+    pointer-events: none;
+}
+
+.top > * {
+    pointer-events: auto;
+}
+
+.top h1,
+.top small {
+    display: block;
+    overflow: hidden;
+    margin: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.top h1 {
+    font-size: clamp(1rem, 3vw, 1.35rem);
+}
+
+.top small {
+    margin-bottom: .25rem;
+    color: #a1a1aa;
+    font: .65rem/1 var(--font-mono);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.top button,
+.state button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0 .75rem;
+    border: 1px solid rgb(255 255 255 / 30%);
+    border-radius: .4rem;
+    color: #fafafa;
+    background: rgb(10 10 10 / 75%);
+}
+
+.state {
+    display: grid;
+    min-height: 100dvh;
+    place-items: center;
+    align-content: center;
+    gap: 1rem;
+    padding: 2rem;
+    color: #fafafa;
+    background: #000;
+    text-align: center;
+}
+
+@media (max-width: 34rem) {
+    .top {
+        align-items: start;
+    }
+
+    .top button:last-child {
+        font-size: .7rem;
+    }
+}

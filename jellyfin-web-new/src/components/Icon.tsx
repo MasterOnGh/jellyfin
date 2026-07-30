@@ -6,6 +6,7 @@ export type IconName =
     | 'back'
     | 'check'
     | 'close'
+    | 'download'
     | 'home'
     | 'info'
     | 'list'
@@ -23,6 +24,7 @@ const paths: Record<IconName, string> = {
     back: 'm15 18-6-6 6-6',
     check: 'm5 12 4 4L19 6',
     close: 'M6 6l12 12M18 6 6 18',
+    download: 'M12 3v12m0 0 5-5m-5 5-5-5M5 19h14',
     home: 'm3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1v-9Z',
     info: 'M12 16v-4m0-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
     list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',

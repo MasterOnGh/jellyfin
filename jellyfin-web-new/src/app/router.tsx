@@ -156,6 +156,13 @@ export const router = createHashRouter([
                                         }
                                     },
                                     {
+                                        path: 'downloads',
+                                        lazy: async () => {
+                                            const { DownloadsPage } = await import('../features/downloads/DownloadsPage');
+                                            return { Component: DownloadsPage };
+                                        }
+                                    },
+                                    {
                                         path: 'settings/profile',
                                         lazy: async () => {
                                             const { ProfileSettingsPage } = await import('../pages/SettingsPages');
@@ -183,6 +190,13 @@ export const router = createHashRouter([
                                 lazy: async () => {
                                     const { WatchPage } = await import('../pages/WatchPage');
                                     return { Component: WatchPage };
+                                }
+                            },
+                            {
+                                path: 'offline-watch/:downloadId',
+                                lazy: async () => {
+                                    const { OfflineWatchPage } = await import('../features/downloads/OfflineWatchPage');
+                                    return { Component: OfflineWatchPage };
                                 }
                             }
                         ]

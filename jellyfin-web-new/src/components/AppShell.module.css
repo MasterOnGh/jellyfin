@@ -73,6 +73,10 @@
     background: var(--color-surface-raised);
 }
 
+.downloadLink {
+    flex: none;
+}
+
 .iconLink svg {
     width: 1.25rem;
     height: 1.25rem;
@@ -101,11 +105,12 @@
 
 @media (max-width: 44rem) {
     .header {
-        height: 3.75rem;
+        height: calc(3.75rem + env(safe-area-inset-top));
+        padding-top: env(safe-area-inset-top);
     }
 
     .desktopNav,
-    .actions .iconLink {
+    .actions .iconLink:not(.downloadLink) {
         display: none;
     }
 

@@ -79,3 +79,11 @@ export function toApiError(error: unknown): ApiError {
         detailOf(failure.response?.data) ?? failure.message
     );
 }
+
+export function isOfflineFallbackError(error: unknown): boolean {
+    return error instanceof ApiError
+        && (error.code === 'network'
+            || error.code === 'unavailable'
+            || error.status === 502
+            || error.status === 504);
+}

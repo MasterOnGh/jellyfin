@@ -97,11 +97,19 @@ function artwork(route: Route) {
     });
 }
 
-export async function mockJellyfin(page: Page, registration = true) {
-    await page.route('**/jellyfin-api/**', async route => {
+export async function mockJellyfin(
+    page: Page,
+    registration = true,
+    apiBasePath = '/jellyfin-api'
+) {
+    const prefix = apiBasePath.replace(/^\/+|\/+$/g, '');
+    await page.route(prefix ? `**/${prefix}/**` : '**/*', async route => {
         const request = route.request();
         const url = new URL(request.url());
-        const path = url.pathname.replace(/^.*\/jellyfin-api\//, '');
+        const marker = prefix ? `/${prefix}/` : '/';
+        const path = prefix
+            ? url.pathname.slice(url.pathname.lastIndexOf(marker) + marker.length)
+            : url.pathname.replace(/^\/+/, '');
         const method = request.method();
 
         if (/\/Images\//.test(path)) return artwork(route);
@@ -193,13 +201,13 @@ export async function mockJellyfin(page: Page, registration = true) {
             });
         }
         if (method !== 'GET') return json(route, {});
-        return json(route, {}, 404);
+        return prefix ? json(route, {}, 404) : route.fallback();
     });
 }
 
-export async function installSession(page: Page) {
-    await page.addInitScript(() => {
-        const baseUrl = `${location.origin}/jellyfin-api`;
+export async function installSession(page: Page, apiBasePath = '/jellyfin-api') {
+    await page.addInitScript(path => {
+        const baseUrl = path ? `${location.origin}${path}` : location.origin;
         const prefix = `jellyfin-web-new:${encodeURIComponent(baseUrl)}`;
         localStorage.setItem(`${prefix}:device-id`, 'device-1');
         localStorage.setItem(`${prefix}:session`, JSON.stringify({
@@ -209,5 +217,5 @@ export async function installSession(page: Page) {
             userId: 'user-1'
         }));
         localStorage.setItem('jellyfin-web-new:locale', 'en');
-    });
+    }, apiBasePath);
 }
